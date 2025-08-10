@@ -9,7 +9,7 @@ export default function App() {
       <nav>
         <Link to="/">Home</Link> |{" "}
         <Link to="/map">Map</Link> |{" "}
-        <Link to="/map">Gmap</Link> |{" "}
+        <Link to="/gmap">Gmap</Link> |{" "}
         <Link to="/log">Log</Link>
 
       </nav>
