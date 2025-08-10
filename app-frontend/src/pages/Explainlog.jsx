@@ -1,3 +1,5 @@
+import React from "react";
+
 export default function Explainlog() {
   const steps = [
     {
@@ -168,7 +170,7 @@ export default function Explainlog() {
           <ul>
             <li>Times are snapped using <code>snapTo15</code>.</li>
             <li><strong>Important:</strong> If there are already segments, the code sets the new segment's <code>fromX</code> equal to the last segment's <code>toX</code>, making segments act sequentially by default.</li>
-            <li>If the new segment crosses midnight (toX < fromX), it is split into two segments: from current point to END_OF_DAY, and from 0 to the toX (wrap-around).</li>
+            <li>If the new segment crosses midnight (toX &lt; fromX), it is split into two segments: from current point to END_OF_DAY, and from 0 to the toX (wrap-around).</li>
             <li>Segments are pushed into the state array, saved, and <code>drawAll()</code> is called to refresh the UI.</li>
           </ul>
           <p><em>Note:</em> automatically forcing <code>fromX = last.toX</code> may be intentional (for a linear log) but can also be adjusted if you want arbitrary, independent entries.</p>
@@ -294,5 +296,4 @@ export default function Explainlog() {
       ))}
     </div>
   );
-      }
-              
+}
