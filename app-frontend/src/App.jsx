@@ -9,14 +9,16 @@ export default function App() {
       <nav>
         <Link to="/">Home</Link> |{" "}
         <Link to="/map">Map</Link> |{" "}
+        <Link to="/map">Gmap</Link> |{" "}
         <Link to="/log">Log</Link>
-        <Link to="/gmap">Gmap</Link>
+
       </nav>
       <Routes>
         <Route path="/" element={<Home />} />
         <Route path="/map" element={<Map />} />
-        <Route path="/log" element={<Log />} />
         <Route path="/gmap" element={<Gmap />} />
+        <Route path="/log" element={<Log />} />
+      
       </Routes>
     </Router>
   );
