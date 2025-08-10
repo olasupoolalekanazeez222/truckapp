@@ -1,12 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
 
-/**
- * Log.jsx
- * Complete React conversion of the Driver's Daily Log SVG tracker.
- * - Keeps IDs for inputs and buttons consistent with original file.
- * - All functionality (snap-to-15, persistent segments, export, remarks, connectors) preserved.
- */
-
 export default function Log() {
   /* ===== Refs for DOM elements (we keep original IDs for parity) ===== */
   const svgRef = useRef(null);
