@@ -1,8 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Link } from "react-router-dom";
 import Home from "./pages/Home";
 import Map from "./pages/Map";
-import Log from "./pages/Log";
 import Gmap from "./pages/Gmap";
+import Log from "./pages/Log";
 export default function App() {
   return (
     <Router>
