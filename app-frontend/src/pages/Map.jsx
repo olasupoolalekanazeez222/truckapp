@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 
-const GOOGLE_API_KEY = "YOUR_GOOGLE_API_KEY"; // <-- replace with your actual key
+const GOOGLE_API_KEY = "AIzaSyBTKT9pnFOyo2Pp-GamlSw1hrcRjIVdrgk"; // <-- replace with your actual key
 
 export default function Map() {
   const [pickupPlace, setPickupPlace] = useState(null);
