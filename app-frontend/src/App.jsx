@@ -3,7 +3,7 @@ import Home from "./pages/Home";
 import Map from "./pages/Map";
 import Gmap from "./pages/Gmap";
 import Log from "./pages/Log";
-import Log from "./pages/Explainlog";
+import Explainlog from "./pages/Explainlog";
 export default function App() {
   return (
     <Router>
