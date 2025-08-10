@@ -8,17 +8,18 @@ import {
 } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
-import "leaflet-routing-machine";
+// routing machine CSS is imported globally in main.jsx
+
+// fix default marker icons (important)
 import iconUrl from "leaflet/dist/images/marker-icon.png";
 import iconShadow from "leaflet/dist/images/marker-shadow.png";
-
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconUrl,
   shadowUrl: iconShadow,
 });
 
-// Autocomplete component (same as before)
+// Basic location search (Nominatim)
 function LocationSearch({ label, onSelect }) {
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
@@ -28,19 +29,25 @@ function LocationSearch({ label, onSelect }) {
       setResults([]);
       return;
     }
-    const fetchData = async () => {
-      const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
-        query
-      )}`;
-      const res = await fetch(url);
-      const data = await res.json();
-      setResults(data);
-    };
-    fetchData();
+    let alive = true;
+    (async () => {
+      try {
+        const res = await fetch(
+          `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(
+            query
+          )}`
+        );
+        const data = await res.json();
+        if (alive) setResults(data);
+      } catch (e) {
+        console.error("Nominatim error", e);
+      }
+    })();
+    return () => (alive = false);
   }, [query]);
 
   return (
-    <div style={{ position: "relative", marginBottom: 20 }}>
+    <div style={{ position: "relative", marginBottom: 12 }}>
       <label>{label}</label>
       <input
         type="text"
@@ -55,7 +62,7 @@ function LocationSearch({ label, onSelect }) {
             position: "absolute",
             background: "white",
             border: "1px solid #ccc",
-            maxHeight: 150,
+            maxHeight: 180,
             overflowY: "auto",
             width: "100%",
             zIndex: 1000,
@@ -87,46 +94,20 @@ function LocationSearch({ label, onSelect }) {
   );
 }
 
-function Routing({ pickup, dropoff }) {
+// small helper to invalidate size when center changes so map isn't grey
+function MapAutoResize({ center }) {
   const map = useMap();
-
   useEffect(() => {
-    if (!pickup || !dropoff) return;
-
-    const routingControl = L.Routing.control({
-      waypoints: [
-        L.latLng(pickup.lat, pickup.lon),
-        L.latLng(dropoff.lat, dropoff.lon),
-      ],
-      lineOptions: {
-        styles: [{ color: "blue", weight: 4 }],
-      },
-      addWaypoints: false,
-      draggableWaypoints: false,
-      fitSelectedRoutes: true,
-      showAlternatives: false,
-    }).addTo(map);
-
-    return () => map.removeControl(routingControl);
-  }, [pickup, dropoff, map]);
-
+    // center can be [lat, lon]
+    if (!map) return;
+    map.invalidateSize();
+    if (center) {
+      map.setView(center);
+    }
+    // slight delay to ensure tiles load
+    // eslint-disable-next-line
+  }, [center, map]);
   return null;
-}
-
-// Helper: Calculate distance between two lat/lng points in meters
-function distanceMeters(pos1, pos2) {
-  const R = 6371e3; // meters
-  const φ1 = (pos1.lat * Math.PI) / 180;
-  const φ2 = (pos2.lat * Math.PI) / 180;
-  const Δφ = ((pos2.lat - pos1.lat) * Math.PI) / 180;
-  const Δλ = ((pos2.lon - pos1.lon) * Math.PI) / 180;
-
-  const a =
-    Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
-    Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
-  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-
-  return R * c;
 }
 
 export default function Map() {
@@ -136,7 +117,7 @@ export default function Map() {
   const [currentPos, setCurrentPos] = useState(null);
   const [positions, setPositions] = useState([]);
 
-  // Motion tracking refs
+  // motion tracking refs (persisted to localStorage)
   const lastPos = useRef(null);
   const motionStart = useRef(null);
   const nonMotionStart = useRef(null);
@@ -144,44 +125,53 @@ export default function Map() {
   const nonMotionIntervals = useRef([]);
   const journeyStart = useRef(Date.now());
 
-  // Load saved intervals and journeyStart on mount
+  // load saved
   useEffect(() => {
-    const savedMotion = localStorage.getItem("motionIntervals");
-    const savedNonMotion = localStorage.getItem("nonMotionIntervals");
-    const savedJourneyStart = localStorage.getItem("journeyStart");
-
-    if (savedMotion) motionIntervals.current = JSON.parse(savedMotion);
-    if (savedNonMotion) nonMotionIntervals.current = JSON.parse(savedNonMotion);
-    if (savedJourneyStart) journeyStart.current = parseInt(savedJourneyStart, 10);
+    const sM = localStorage.getItem("motionIntervals");
+    const sN = localStorage.getItem("nonMotionIntervals");
+    const sJ = localStorage.getItem("journeyStart");
+    if (sM) motionIntervals.current = JSON.parse(sM);
+    if (sN) nonMotionIntervals.current = JSON.parse(sN);
+    if (sJ) journeyStart.current = parseInt(sJ, 10);
   }, []);
 
-  // Save intervals to localStorage every 10 seconds (or you can do on unload)
+  // persist periodically
   useEffect(() => {
-    const interval = setInterval(() => {
+    const id = setInterval(() => {
       localStorage.setItem("motionIntervals", JSON.stringify(motionIntervals.current));
       localStorage.setItem("nonMotionIntervals", JSON.stringify(nonMotionIntervals.current));
-      localStorage.setItem("journeyStart", journeyStart.current.toString());
+      localStorage.setItem("journeyStart", String(journeyStart.current));
     }, 10000);
-
-    return () => clearInterval(interval);
+    return () => clearInterval(id);
   }, []);
 
-  // Geolocation tracking: update current position and classify motion/non-motion
+  // geolocation watch & motion detection
   useEffect(() => {
-    if (!navigator.geolocation) return;
+    if (!("geolocation" in navigator)) return;
 
-    const motionThresholdMeters = 10; // distance to count as motion
-    const nonMotionMinimumMs = 15 * 60 * 1000; // 15 minutes stationary threshold
+    const motionThreshold = 10; // meters
+    const nonMotionMin = 15 * 60 * 1000; // 15 minutes
+
+    function distanceMeters(p1, p2) {
+      const R = 6371e3;
+      const φ1 = (p1.lat * Math.PI) / 180;
+      const φ2 = (p2.lat * Math.PI) / 180;
+      const Δφ = ((p2.lat - p1.lat) * Math.PI) / 180;
+      const Δλ = ((p2.lon - p1.lon) * Math.PI) / 180;
+      const a =
+        Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+        Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      return R * c;
+    }
 
     function updateIntervals(motionSec, nonMotionSec) {
       const elapsedMs = Date.now() - journeyStart.current;
-      const elapsedDays = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
-
-      while (motionIntervals.current.length <= elapsedDays) motionIntervals.current.push(0);
-      while (nonMotionIntervals.current.length <= elapsedDays) nonMotionIntervals.current.push(0);
-
-      motionIntervals.current[elapsedDays] += motionSec / 3600; // convert sec to hours
-      nonMotionIntervals.current[elapsedDays] += nonMotionSec / 3600;
+      const dayIdx = Math.floor(elapsedMs / (24 * 60 * 60 * 1000));
+      while (motionIntervals.current.length <= dayIdx) motionIntervals.current.push(0);
+      while (nonMotionIntervals.current.length <= dayIdx) nonMotionIntervals.current.push(0);
+      motionIntervals.current[dayIdx] += motionSec / 3600;
+      nonMotionIntervals.current[dayIdx] += nonMotionSec / 3600;
     }
 
     const watchId = navigator.geolocation.watchPosition(
@@ -197,28 +187,26 @@ export default function Map() {
           return;
         }
 
-        const dist = distanceMeters(lastPos.current, newPos);
+        const d = distanceMeters(lastPos.current, newPos);
         const now = Date.now();
 
         if (!motionStart.current && !nonMotionStart.current) {
           motionStart.current = now;
           nonMotionStart.current = null;
         } else {
-          if (dist >= motionThresholdMeters) {
-            // User is moving
+          if (d >= motionThreshold) {
+            // moved
             if (nonMotionStart.current) {
-              const nonMotionDuration = now - nonMotionStart.current;
-              if (nonMotionDuration >= nonMotionMinimumMs) {
-                updateIntervals(0, nonMotionDuration / 1000);
-              }
+              const nmDur = now - nonMotionStart.current;
+              if (nmDur >= nonMotionMin) updateIntervals(0, nmDur / 1000);
               nonMotionStart.current = null;
-              motionStart.current = now;
             }
+            motionStart.current = now;
           } else {
-            // User stationary
+            // stationary
             if (motionStart.current) {
-              const motionDuration = now - motionStart.current;
-              updateIntervals(motionDuration / 1000, 0);
+              const mDur = now - motionStart.current;
+              updateIntervals(mDur / 1000, 0);
               motionStart.current = null;
               nonMotionStart.current = now;
             } else if (!nonMotionStart.current) {
@@ -230,46 +218,83 @@ export default function Map() {
         lastPos.current = newPos;
       },
       (err) => {
-        console.error("Geolocation error:", err);
+        console.error("geolocation err", err);
       },
-      { enableHighAccuracy: true }
+      { enableHighAccuracy: true, maximumAge: 1000 }
     );
 
     return () => navigator.geolocation.clearWatch(watchId);
   }, []);
 
-  // Center map on pickup, current position, or fallback
-  const center = pickup
-    ? [pickup.lat, pickup.lon]
-    : currentPos
-    ? [currentPos.lat, currentPos.lon]
-    : [0, 0];
+  // center fallback
+  const center = pickup ? [pickup.lat, pickup.lon] : currentPos ? [currentPos.lat, currentPos.lon] : [0, 0];
 
   return (
-    <div style={{ maxWidth: 700, margin: "auto", padding: 20 }}>
-      <h2>Leaflet OSM Journey Tracker with Motion Tracking</h2>
+    <div style={{ maxWidth: 900, margin: "auto", padding: 12 }}>
+      <h2>Leaflet OSM Journey Tracker</h2>
 
-      <LocationSearch label="Pickup Location" onSelect={setPickup} />
-      {pickup && <p>Selected Pickup: {pickup.name}</p>}
+      <div style={{ maxWidth: 480 }}>
+        <LocationSearch label="Pickup" onSelect={setPickup} />
+        {pickup && <div>Pickup: {pickup.name}</div>}
+        <LocationSearch label="Dropoff" onSelect={setDropoff} />
+        {dropoff && <div>Dropoff: {dropoff.name}</div>}
+      </div>
 
-      <LocationSearch label="Dropoff Location" onSelect={setDropoff} />
-      {dropoff && <p>Selected Dropoff: {dropoff.name}</p>}
+      <div style={{ marginTop: 12 }}>
+        <MapContainer center={center} zoom={13} style={{ height: "450px", width: "100%" }}>
+          <TileLayer
+            attribution="&copy; OpenStreetMap contributors"
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+          {pickup && <Marker position={[pickup.lat, pickup.lon]} />}
+          {dropoff && <Marker position={[dropoff.lat, dropoff.lon]} />}
+          {currentPos && <Marker position={[currentPos.lat, currentPos.lon]} />}
+          {positions.length > 1 && (
+            <Polyline positions={positions.map((p) => [p.lat, p.lng])} pathOptions={{ color: "red" }} />
+          )}
 
-      <MapContainer center={center} zoom={13} style={{ height: 450, width: "100%" }}>
-        <TileLayer
-          attribution="&copy; OpenStreetMap contributors"
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
-        {pickup && <Marker position={[pickup.lat, pickup.lon]} />}
-        {dropoff && <Marker position={[dropoff.lat, dropoff.lon]} />}
-        {currentPos && <Marker position={[currentPos.lat, currentPos.lon]} />}
+          <MapAutoResize center={center} />
 
-        {positions.length > 1 && (
-          <Polyline positions={positions.map((p) => [p.lat, p.lng])} color="red" />
-        )}
-
-        {pickup && dropoff && <Routing pickup={pickup} dropoff={dropoff} />}
-      </MapContainer>
+          {/* RoutingControl: lazy load leaflet-routing-machine in the browser */}
+          {pickup && dropoff && <RoutingControl pickup={pickup} dropoff={dropoff} />}
+        </MapContainer>
+      </div>
     </div>
   );
+}
+
+// Component that lazy-loads leaflet-routing-machine to avoid SSR/bundle issues
+function RoutingControl({ pickup, dropoff }) {
+  const map = useMap();
+  const routingRef = useRef(null);
+
+  useEffect(() => {
+    if (!pickup || !dropoff || !map) return;
+
+    let active = true;
+    // dynamic import so Vite doesn't try to bundle it server-side wrongly
+    import("leaflet-routing-machine")
+      .then(() => {
+        if (!active) return;
+        // create control (L.Routing available globally after import)
+        routingRef.current = L.Routing.control({
+          waypoints: [L.latLng(pickup.lat, pickup.lon), L.latLng(dropoff.lat, dropoff.lon)],
+          lineOptions: { styles: [{ color: "blue", weight: 4 }] },
+          addWaypoints: false,
+          draggableWaypoints: false,
+          fitSelectedRoutes: true,
+          showAlternatives: false,
+        }).addTo(map);
+      })
+      .catch((err) => {
+        console.error("Error loading routing machine:", err);
+      });
+
+    return () => {
+      active = false;
+      if (routingRef.current && map) map.removeControl(routingRef.current);
+    };
+  }, [pickup, dropoff, map]);
+
+  return null;
 }
