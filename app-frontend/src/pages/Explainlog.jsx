@@ -1,11 +1,3 @@
-import React from 'react';
-
-/**
- * SvgTrackerExplanation
- * Mobile-friendly step-by-step explanation of the Driver's Daily Log code.
- * - Uses <details> for collapsible steps (accessible + mobile friendly).
- * - Self-contained styles so you can drop it into a React page.
- */
 export default function Explainlog() {
   const steps = [
     {
